@@ -1,26 +1,34 @@
 import json
-from dataclasses import dataclass
 from datetime import datetime
+from attrs import define, field
 
 from ics import Calendar, Event
+import phonenumbers
+import networkx as nx
 
 
-@dataclass
+def normalize_phone_number(input: str, region: str = "US") -> str:
+    if input is None:
+        return None
+    return phonenumbers.format_number(
+        phonenumbers.parse(input, region),
+        phonenumbers.PhoneNumberFormat.NATIONAL)
+
+def convert_date(input: str) -> datetime | None:
+    if input is None:
+        return None
+    return datetime.strptime(input, "%Y-%m-%d")
+
+
+@define(frozen=True)
 class Person:
     first_name: str
     last_name: str
-    birthday: datetime
-    anniversary: datetime = None
-
-    def __init__(
-        self, first_name: str, last_name: str, birthday: str, anniversary: str = None
-    ):
-        self.first_name = first_name
-        self.last_name = last_name
-        self.birthday = datetime.strptime(birthday, "%Y-%m-%d")
-        self.anniversary = (
-            datetime.strptime(anniversary, "%Y-%m-%d") if anniversary else None
-        )
+    birthday: datetime = field(converter=convert_date)
+    anniversary: datetime = field(default=None, converter=convert_date)
+    phone: str = field(default=None, converter=lambda phone: normalize_phone_number(phone))
+    email: str = None
+    nickname: str = None
 
 
 def ordinal(n: int):
@@ -40,11 +48,20 @@ def load_from_file(filepath: str) -> list[Person]:
 def generate_birthday_events(person: Person, num_years: int = 110) -> list[Event]:
     events = []
     year = person.birthday.year
+    description = f"""
+{person.first_name} {person.last_name} was born on {person.birthday.strftime("%B %d, %Y")}.
+
+Contact info:
+    {person.nickname if person.nickname else person.first_name}:
+    📱 {person.phone}
+    📧 {person.email}
+    """.strip()
+    print(description)
     for i in range(num_years):
         tag = f"{ordinal(i)} " if i > 0 else ""
-        title = f"{person.first_name}'s {tag}Birthday"
+        title = f"{person.nickname if person.nickname else person.first_name}'s {tag}Birthday"
         date = f"{year + i}-{person.birthday.month}-{person.birthday.day}"
-        e = Event(name=title, begin=date)
+        e = Event(name=title, begin=date, description=description)
         e.make_all_day()
         events.append(e)
     return events
@@ -52,6 +69,8 @@ def generate_birthday_events(person: Person, num_years: int = 110) -> list[Event
 
 def main():
     people = load_from_file("small_family.json")
+    graph = nx.Graph()
+    graph.add_nodes_from(people)
     print(people)
     events = []
     for person in people:
