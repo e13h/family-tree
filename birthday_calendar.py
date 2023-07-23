@@ -2,6 +2,7 @@ import json
 from datetime import datetime
 from textwrap import indent
 
+import matplotlib.pyplot as plt
 import networkx as nx
 import phonenumbers
 from attrs import define, field
@@ -32,11 +33,14 @@ class Person:
     phone: str = field(default=None, converter=normalize_phone_number)
     email: str = None
     nickname: str = field()
-    parents: tuple[str] = field(default=tuple())
+    parents: tuple[str] = field(default=tuple(), converter=tuple)
 
     @nickname.default
     def _first_name_is_nickname(self) -> str:
         return self.first_name
+
+    def __repr__(self) -> str:
+        return self.nickname
 
 
 def ordinal(n: int):
@@ -59,25 +63,27 @@ def create_contact_info(person: Person) -> str:
     email_contact = f"\n📧 {person.email}" if person.email else ""
     if phone_contact or email_contact:
         contact_info = f"{person.nickname}:{phone_contact}{email_contact}"
-        contact_info = "\n\nContact info:\n" + indent(contact_info, "    ")
         return contact_info
     return ""
 
 
-def generate_birthday_events(person: Person, num_years: int = 110) -> list[Event]:
+def generate_birthday_events(
+    person: Person, graph: nx.DiGraph = None, num_years: int = 110
+) -> list[Event]:
     events = []
     year = person.birthday.year
     contact_info = create_contact_info(person)
-    if contact_info == "" and len(person.parents) > 0:
+    if contact_info == "" and graph is not None:
         contact_info = "\n".join(
-            [create_contact_info(parent) for parent in person.parents]
-        )
+            [create_contact_info(parent) for _, parent in graph.out_edges(person)]
+        ).strip()
+    if contact_info != "":
+        contact_info = "\n\nContact info:\n" + indent(contact_info, "    ")
     bday_formatted = person.birthday.strftime("%B %d, %Y")
     description = (
         f"{person.first_name} {person.last_name} was born on {bday_formatted}."
         + contact_info
     )
-    print(description)
     for i in range(num_years):
         tag = f"{ordinal(i)} " if i > 0 else ""
         title = f"{person.nickname}'s {tag}Birthday"
@@ -92,10 +98,15 @@ def main():
     people = load_from_file("small_family.json")
     graph = nx.DiGraph()
     graph.add_nodes_from(people.values())
-    print(people)
-    events = []
     for person in people.values():
-        events.extend(generate_birthday_events(person))
+        for parent_id in person.parents:
+            if parent_id in people:
+                graph.add_edge(person, people[parent_id])
+    nx.draw(graph, with_labels=True)
+    plt.show()
+    events = []
+    for person in graph:
+        events.extend(generate_birthday_events(person, graph))
     cal = Calendar(events=events)
     with open("test.ics", "w", encoding="utf-8") as f:
         f.writelines(cal.serialize_iter())
